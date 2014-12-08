@@ -1,0 +1,904 @@
+.model small
+.stack 100h
+.data
+CR	EQU	000Dh
+LF	EQU	000Ah
+bombMessage db "N de bombas:$"
+columnsMessage db "N de colunas:$"
+rowsMessage db "N de linhas:$"
+pressButtonMessage1 db "Pressione qualquer.$"
+pressButtonMessage2 db "tecla para continuar.$"
+markedBombsMessage db "Bombas marcadas:$"
+loseMessage db "Voce perdeu!!:$"
+winMessage db "Voce venceu!!:$"
+timerMessage db "Tempo: $"
+MATRIX_BOMBS dw 50 dup (23 dup (0))
+ROW_TEMP DB	00h
+COLUMN_TEMP DB	00h
+MOUSE_X DW	00h
+MOUSE_Y DW	00h
+SECONDS db 00h
+LAST_SECOND db 00h
+MINUTES db 00h
+WAS_MOUSE_PRESSED db 00h
+BOMBAS_TEMP Db	00h
+MARKED_BOMBS DB 00h
+CONT_TEMP DB	00h
+TESTE DB 00h
+INCREMENT dw 00h
+MULTIPLICATOR db 00h
+M dw 00h
+SEED dw 00h
+.code
+
+NOVA_LINHA PROC
+    push dx
+    mov dx, CR
+    call ESC_CHAR
+    mov dx, LF
+    call ESC_CHAR
+    pop dx
+    ret
+NOVA_LINHA ENDP
+
+LE_CHAR PROC
+    mov ah, 07h
+    int 21h
+    ret
+ENDP
+
+ESC_CHAR PROC	; Escreve caractere em DL
+    mov ah,02H
+    int 21h
+    ret
+ENDP
+
+LER_UINT16 PROC
+	push bx
+	push cx
+	push dx
+	
+        mov cx,10
+        xor bx,bx
+        xor ax,ax
+        
+ LEITURA:
+    	push ax
+        call LE_CHAR
+        cmp al, 13	; Compara com o ENTER
+        jz FIM
+        cmp al, '0'	; Verifica se é válido 
+        jb ERROCHAR
+        cmp al, '9'
+        ja ERROCHAR	; Verifica se é válido
+        mov dl, al
+        call ESC_CHAR	; Escreve o caractere na tela
+	mov ah, 0	
+        sub al,'0' 	;transforma numero
+	mov bx,ax
+        pop ax        
+        mul cx
+        add ax,bx
+        jmp LEITURA
+        
+ERROCHAR:		; Desempilhar valor atual empilhado
+	pop ax
+	jmp LEITURA
+    
+    FIM: call NOVA_LINHA
+    	pop ax
+    	pop dx
+        pop cx
+        pop bx
+        ret
+ENDP             
+
+
+LIMPATELA PROC ; Limpa a tela
+    push ax
+    mov ah, 00h 
+    mov al, 03h 
+    int 10h 
+    pop ax 
+    ret 
+LIMPATELA ENDP
+
+PUSHALL macro
+push AX BX CX DX
+push SI DI BP 
+endm
+
+POPALL macro
+pop BP DI SI
+pop DX CX BX AX 
+Endm
+
+SET_CUR_POS macro ROW,COLUMN
+	push ax
+	xor ax,ax
+	mov ah, 02H ; Seta a posição do cursor
+	mov dh, ROW ; Linha do cursor
+	mov dl, COLUMN ; Coluna do cursor
+	int 10H
+	pop ax
+endm
+
+WRITE_MESSAGE macro ; Escreve na tela o valor que está armazenado em DX
+	mov ah, 9 ; Seta o modo de vídeo para escrever em no cursor um caracter
+	int 21H ; Chamada da interrupção para escrever o caracter armazenado em dx
+endm
+
+REQUEST_INFORMATIONS PROC ; Retorna o número de colunas no CX e o número de linhas no BX
+	PUSHALL
+	
+		REQUEST_NUMBERS_BOMBS: 	SET_CUR_POS 2, 1 ; Seta a posição do cursor para linha 1 e coluna 1
+								mov dx, offset bombMessage
+								WRITE_MESSAGE; Escreve na tela o valor que está armazenado em DX
+								call LER_UINT16
+								
+								cmp ax,5 ; Compara com o valor de ax que contem o ultimo valor digitado.
+								jb REQUEST_NUMBERS_BOMBS ; caso o valor informado for menor que 5, ele requisita o número de bombas novamente.
+								mov BOMBAS_TEMP, al ; Move para o BOMBAS_TEMP o numero de bombas a serem geradas
+								
+		REQUEST_NUMBERS_COLUMNS: SET_CUR_POS 3,1; Seta a posição do cursor para linha 2 e coluna 1
+								mov dx, offset columnsMessage
+								WRITE_MESSAGE ; Escreve na tela o valor que está armazenado em DX
+								call LER_UINT16
+								
+								cmp ax, 5 ; Compara com o ultimo valor digitado
+								jb REQUEST_NUMBERS_COLUMNS ; caso seja menor que 5, ele requisita o número de colunas novamente.
+								cmp ax, 50 ; Compara com o ultimo valor digitado
+								ja REQUEST_NUMBERS_COLUMNS ; caso seja maior que 50, ele requisita o número de colunas novamente.
+								mov COLUMN_TEMP, al ; COLUMN_TEMP armazena o número de colunas
+								
+		REQUEST_NUMBERS_ROWS: 	SET_CUR_POS 4,1 ; Seta a posição do cursor para linha 3 e coluna 1
+								mov dx, offset rowsMessage
+								WRITE_MESSAGE ; Escreve na tela o valor que está armazenado em DX
+								call LER_UINT16
+								cmp ax, 5 ; Compara com o ultimo valor digitado
+								jb REQUEST_NUMBERS_ROWS ; caso seja menor que 5, ele requisita o número de colunas novamente.
+								cmp ax, 23 ; Compara com o ultimo valor digitado
+								ja REQUEST_NUMBERS_ROWS ; caso seja maior que 23, ele requisita o número de colunas novamente.							
+								mov ROW_TEMP, al ;ROW_TEMP armazena o número de linhas
+		
+		xor bx,bx
+		xor dx,dx
+		
+		mov bl, COLUMN_TEMP
+		mul bx ; Multiplica o número de linhas(AX) pelo número de colunas(BX) e o resultado fica armazenado em AX
+		push ax
+		xor ax,ax
+		mov al, BOMBAS_TEMP
+		mov bx,3
+		mul bx
+		mov dx,ax
+		pop ax
+		
+		cmp ax,dx ; Compara a o número de linhas multiplicado pelo número de colunas com  o número de bombas, caso seja menor que 3 vezes o número de bombas, ele requisita todas as informações novamente.
+		jb REQUEST_NUMBERS_BOMBS
+		
+		POPALL
+	ret
+endp
+
+TRANFORM_POS_MATRIX_AT_POS_SCREEN macro; recebe em DH-Linha e DL-Coluna o valor da posição na matriz, e retorna nos mesmos registradores o valor correspondente à tela.
+	push dx ; Empilha o valor atual de dx, pois será modificado na macro.
+	inc dh ; Incrementa dh, pois a posição da linha na tela e na matriz tem a diferença de 1 unidade.
+	add dl, 26	; Soma na posição na matrix, o valor 26, pois a posição da coluna na tela e na matriz tem a diferença de 26 unidades.
+	SET_CUR_POS dh,dl ; Seta a posição do cursor na tela.
+	pop dx ; Desempilha o valor de dx.
+endm
+		
+WRITE_ELEMENT_ON_SCREEN  macro; Escreve o caracter armazenado em al.
+	push ax bx cx
+	mov ah, 0AH ; Seta o modo de vídeo para escrever no cursor um caracter
+	mov bh, 0H ; Número da página
+	xor cx,cx
+	mov cl, 1
+	int 10H ; Chamada da interrupção para escrever o caracter armazenado em alA
+	pop cx bx ax
+endm
+
+WRITE_ELEMENT_ON_SCREEN_WITH_ATTRIBUTE macro
+	push ax bx cx
+	mov ah,09H
+	mov bh, 0H
+	mov cl,1
+	mov bl,al
+	and bl,0FH
+		
+	FINISH_WRITE_ELEMENT_ON_SCREEN_WITH_ATTRIBUTE:
+	int 10H
+	pop cx bx ax
+endm
+
+WRITE_FIELD proc
+		PUSHALL
+		xor dx, dx ; inicia a linha e coluna em 0
+		xor cx, cx
+		
+		GET_CURRENT_ELEMENT:
+				xor ax,ax ; Limpa o conteúdo do registrador AX, que será usado para armazenar o valor da posição [DL][DH] na matriz.
+				mov bx, offset MATRIX_BOMBS ; Pega o offset da matriz
+				call GET_ELEMENT_AT_INDEX ; Pega o conteúdo do registrador AX, que contem o valor armazenado em [DL][DH] na matriz.
+				mov cl, al ; mov para DX o valor de AX, pois nas linhas abaixo é feito SHR, o que altera o valor do registrador em questão.
+				cmp cl, 01H ; Move para o carry flag o valor do bit menos significativo, que indica se o campo está visível ou não.
+				je WRITE_CONTENT ;Caso o campo esteja visível, ele escreve o valor de bombas vizinhas.
+				cmp cl, 02 ; Move para o carry flag o valor do bit menos significativo, que indica se o campo está marcado.
+				je WRITE_MARKED_FIELD ; Caso o campo esteja marcado , ele escreve o caracter 176.
+				jmp WRITE_HIDE_FIELD ; Caso o campo não esteja marcado nem visível, ele escreve o caracter 178.
+		
+		WRITE_CONTENT:
+			mov al,ah ; passa para a parte baixa do registrador o valor atual de bombas vizinhas.
+			TRANFORM_POS_MATRIX_AT_POS_SCREEN ; Transforma a posição da matriz em uma posição relativa a tela.
+			
+			cmp al, 0
+			je IS_EMPTY
+			jmp IS_NOT_EMPTY
+			
+			IS_EMPTY:
+				mov al, 176
+				WRITE_ELEMENT_ON_SCREEN
+				jmp GO_TO_THE_NEXT_COLUMN
+				
+			IS_NOT_EMPTY:
+				add al,30H ; Transforma em caracter ascii o valor atual de bombas vizinhas.
+				WRITE_ELEMENT_ON_SCREEN_WITH_ATTRIBUTE ; escreve o valor de al na tela.
+				jmp GO_TO_THE_NEXT_COLUMN
+		
+		WRITE_MARKED_FIELD:
+			mov al, 63
+			TRANFORM_POS_MATRIX_AT_POS_SCREEN ; Transforma a posição da matriz em uma posição relativa a tela. 
+			WRITE_ELEMENT_ON_SCREEN ; escreve o valor de al na tela.
+			jmp GO_TO_THE_NEXT_COLUMN
+			
+		WRITE_HIDE_FIELD:
+			mov al, 178
+			TRANFORM_POS_MATRIX_AT_POS_SCREEN ; Transforma a posição da matriz em uma posição relativa a tela.
+			WRITE_ELEMENT_ON_SCREEN ; escreve o valor de al na tela.
+			jmp GO_TO_THE_NEXT_COLUMN ; Incrementa a coluna
+			
+		GO_TO_THE_NEXT_COLUMN:
+			inc dl
+			cmp dl, COLUMN_TEMP
+			jz GO_TO_THE_NEXT_ROW
+			jmp GET_CURRENT_ELEMENT
+			
+		 GO_TO_THE_NEXT_ROW:
+			xor dl,dl
+			inc dh
+			cmp dh, ROW_TEMP
+			jz FINISH_WRITE_FIELD
+			jmp GET_CURRENT_ELEMENT
+			
+	FINISH_WRITE_FIELD: POPALL
+	ret
+endp
+
+GENERATE_RANDON_NUMBER proc ;(33 . contador(até numero de bombas) + 1) /(divisao inteira por) (numero de coluas ou numero de linhas)	
+	PUSHALL
+	
+	xor bx, bx
+	xor ax, ax
+	mov SEED, 1 ; Semente
+	mov MULTIPLICATOR, 33; Multiplicador  (a)
+	mov INCREMENT , 1 ; Incremento (c)
+	mov bl, COLUMN_TEMP
+	mov al, ROW_TEMP 
+	mul bx; Armazena o M
+	mov M, ax
+	
+	mov CONT_TEMP, 0
+	RNG:
+		xor ax, ax
+		mov al, MULTIPLICATOR ; Move para ax o valor do multiplicador.
+		mov bx, SEED
+		mul bx ; Multiplicação do multiplicador com a semente
+		add ax, INCREMENT
+		mov bx, M
+		div bx		
+		mov SEED, dx ; Move para a semente o valor do resto da divisão
+		mov ax,dx
+		xor bx,bx
+		mov bl, COLUMN_TEMP
+		div bl
+		mov dh, al
+		mov dl, ah
+		
+		inc CONT_TEMP
+		
+		mov ax, 0F00H
+		call WRITE_ELEMENT_AT_INDEX
+		
+		mov al, BOMBAS_TEMP
+		cmp CONT_TEMP,al ; compara para ver se o contador já chegou no numero total de numeros gerados
+		jge CONTINUA
+		jmp RNG
+		
+	CONTINUA:
+	POPALL	
+	ret
+endp
+
+GET_NEIGHBORHOOD_BOMBS proc ; Recebe em DH-Linha e DL-Coluna onde será feita a verificação, e retornará em CL o número de bombas vizinhas
+	push bx
+	push dx
+	
+	xor cl,cl
+	xor bx,bx
+	
+	dec DH ; Decrementa uma unidade da linha, pois a verificação da vizinhaça começa a partir do noroeste da posição passada em [DH - DL]
+	dec DL ; Decrementa uma unidade da coluna, pois a verificação da vizinhaça começa a partir do noroeste da posição passada em [DH - DL]
+	
+	FIND_NEIGHBORHOOD_BOMBS : xor ax,ax	
+							  call GET_ELEMENT_AT_INDEX
+							  cmp AH,0FH ; Compara AH com o valor 15 (1111) que indica que a posição atual de vizinhaça é uma bomba.
+							  jz COMPUTE_BOMB ; Incrementa o número de bombas vizinhas
+							  jmp KEEP_GOING
+							  
+							  COMPUTE_BOMB: inc cl
+							  KEEP_GOING: 
+								inc bl
+								
+							  cmp bl, 03
+							  jz RESET_COLUMN_AND_INC_ROW
+							  inc dl
+							  jmp FIND_NEIGHBORHOOD_BOMBS
+							  
+							  RESET_COLUMN_AND_INC_ROW: xor bl,bl ; 0002 > 0000
+														sub dl, 02H
+														inc bh
+														inc dh
+														cmp bh, 03
+														jz FINISH_SEARCH
+														jmp FIND_NEIGHBORHOOD_BOMBS
+	FINISH_SEARCH: 
+	pop dx
+	pop bx
+ret
+endp
+
+FIND_NEIGHBORHOOD proc
+	PUSHALL
+	xor dl,dl ; Zera o registrador DL que será usado como indicador de coluna na matriz
+	xor dh,dh ; Zera o registrador DH que será usado como indicador de linha na matriz
+	
+	FIND_BOMBS:
+		call GET_ELEMENT_AT_INDEX ; pega o valor correspondente á linha e coluna passada por "parametro"
+		cmp ah,0FH ; Verifica se a posição que será analizada é uma bomba, caso sim ele não calcula nenhuma vizinhaça e avança a coluna.		
+		je NEXT_COLUMN
+		
+		call GET_NEIGHBORHOOD_BOMBS ; Retorna o número de bombas na vizinhaça da posição DH-Linha e DL-Coluna em CL
+		mov ah,cl ; Move para AH a quantia de bombas encontradas na vizinhaça
+		
+		mov bx, offset MATRIX_BOMBS		
+		call WRITE_ELEMENT_AT_INDEX ; Escreve o número de bombas achadas na vizinhaça na parte alta (AH).
+		
+		NEXT_COLUMN:
+			inc dl ; Incremente a coluna da posição.
+			cmp dl, COLUMN_TEMP ; Compara com o tamanho da coluna informada pelo usuário, caso seja igual, ele volta para a coluna 0 e incrementa coluna, caso contrário continua a verificação.
+			jz NEXT_ROW
+			jmp FIND_BOMBS
+		
+		NEXT_ROW:    xor dl, dl ; Zera o contador de colunas.
+					 inc dh ; Pula para a próxima linha.
+					 cmp dh, ROW_TEMP ; Compara com  a quantia de linhas informadas pelo usuário, caso a linha atual seja a última, ele finaliza a proc, caso contrário continua a verificação.
+					 jz FINISH_FIND_NEIGHBORHOOD
+					 jmp FIND_BOMBS
+	
+	FINISH_FIND_NEIGHBORHOOD: POPALL
+ret
+endp
+
+GET_ELEMENT_AT_INDEX proc 	; Pega elemento da matriz dada em BX na posição [DH - Linha ][DL - COLUNA] e retorna em AX
+		push cx
+		push bx
+		push si
+		push dx
+		
+		call IS_VALID_POSITION
+		cmp cl, 0
+		je FINISH_GET_ELEMENT_AT_INDEX
+		
+		mov al, COLUMN_TEMP ; move para al o tamanho da linha
+		mul dh 				; multiplica pelo número da linha para corrigir a posição de acesso na matriz.
+		xor dh,dh	; Limpa o valor da linha, pois ela já foi usado acima e para não interferir no comando abaixo.
+		add ax, dx ; Soma o valor multiplicado acima pela coluna para corrigir a posição de acesso na matriz.
+		shl ax,1 ; Multiplica a posição por 2, pois um elemento da matrix ocupa 2 posições
+		
+		mov si, ax  ; Move para si para ser usado como deslocamento no endereço base na matriz de elementos.
+		
+		mov ax, word ptr [MATRIX_BOMBS][si] ; Move para ax o valor solicitado na posição [DH - Linha ][DL - COLUNA] na matriz.
+		
+		FINISH_GET_ELEMENT_AT_INDEX:
+		pop dx
+		pop si
+		pop bx
+		pop cx
+		ret
+ENDP
+
+WRITE_ELEMENT_AT_INDEX proc 	; Escreve o byte armazenado em AX na posiçao [DH - Linha][DL - Coluna] da matriz armazenada em BX
+		push cx
+		push bx
+		push si
+		push dx
+		push ax
+		
+		call IS_VALID_POSITION
+		cmp cl, 0
+		je FINISH_WRITE_ELEMENT_AT_INDEX
+		
+		mov al, COLUMN_TEMP	; move para al o tamanho da linha
+		mul dh 				; multiplica pelo número da linha para corrigir a posição de acesso na matriz.
+		xor dh,dh ; Limpa o valor da linha, pois ela já foi usado acima e para não interferir no comando abaixo.
+		add ax, dx ; Soma o valor multiplicado acima pela coluna para corrigir a posição de acesso na matriz.
+		shl ax,1 ; Multiplica a posição por 2, pois um elemento da matrix ocupa 2 posições.
+		
+		mov si, ax ; Move para si para ser usado como deslocamento no endereço base na matriz de elementos.
+		
+		pop ax ; Desempilha o valor passo para a proc para ser salvo na posição especifica em [DH - Linha][DL - Coluna].
+		mov word ptr[MATRIX_BOMBS][si], ax ; Salva o conteúdo de ax na matrix.
+		
+		FINISH_WRITE_ELEMENT_AT_INDEX:
+		pop dx
+		pop si
+		pop bx
+		pop cx
+		ret
+ENDP
+
+WRITE_FRAME PROC; Essa proc escreve a moldura a onde contem as informações sobre o jogo.
+	PUSHALL
+	WRITE_VERTICAL_FRAME macro	; Macro para escrever a moldura dos lados direito e esquerdo (baseando-se na coluna(dl) e linha(dh)
+	mov ah, 0AH ; Seta o modo de vídeo para escrever em no cursor um caracter
+	mov bh, 0H ; Número da página
+	mov al, 186 ; caracter a ser escrito
+	int 10H	
+	endm
+	
+	WRITE_HORIZONTAL_FRAME macro ;Macro para escrever a moldura de cima e de baixo
+	mov ah, 0AH ; Seta o modo de vídeo para escrever no cursor um caracter
+	mov bh, 0H ; Número da página
+	mov al, 205 ; Caracter a ser escrito
+	mov cx,25 ; Número de repetições que será escrito o caracter em al
+	int 10H ; Chamada da interrupção para escrever o caracter armazenado em alA	
+	endm
+	
+	SET_CUR_POS 1,0
+	
+	WRITE_HORIZONTAL_FRAME ; Escrita da parte superior da moldura
+	
+	xor dh, dh ; linha onde será escrito os frames
+	inc dh
+	xor cx,cx ; especifica quantas vezes será escrito o caracter em AL quando for chamada a interrupção de escrita
+	inc cx ; especifica quantas vezes será escrito o caracter em AL quando for chamada a interrupção de escrita
+	
+	WRITE_SIDES_FRAMES:	mov ah, 02H ; Seta a posição do cursor
+						inc dh ; Usado para controlar a quantidade de linhas escritas
+						mov dl, 0 ; Coluna do cursor
+						int 10H
+	
+						WRITE_VERTICAL_FRAME ; Escrita da parte esquerda da moldura
+						
+						mov ah, 02H ; Seta a posição do cursor
+						mov dl, 24 ; Coluna do cursor - setado para especificar que a próxima escrita do caracter | da moldura será escrito no lado direito.
+						int 10H
+						
+						WRITE_VERTICAL_FRAME ; Escrita da parte direita da moldura
+					  
+						cmp dh, 15 ; quando a quantia de linhas escritas for 15, ele sai do laço e escreve a ultima parte da molduras						
+						jnz WRITE_SIDES_FRAMES
+	
+	mov ah, 02H ; Seta a posição do cursor
+	inc dh ; valor atual do registrador será 16, pois ao sair do laço WRITE_SIDES_FRAMES o valor dele será 15, o que indica que a ultima parte da moldura(parte inferior) será escrita na linha 16
+	mov dl, 0 ; Coluna do cursor
+	int 10H	
+	
+	WRITE_HORIZONTAL_FRAME ; Escrita da parte inferior da moldura
+	
+	POPALL	
+	ret
+endp
+
+ESCREVE: pop dx		; Laço que escreve os caracteres empilhados
+        call ESC_CHAR
+        loop ESCREVE
+        call NOVA_LINHA
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+ENDP
+
+TRANSFORM_MOUSE_INPUT_AT_MATRIX_ELEMENT proc; Recebe em CX a linha do mouse e DX a coluna do mouse e retorna a posição equivalente da matrix 
+											; nos ro registrador DX -> [DH][DL], retorna em CL = 1 se a posição clicada é válida.
+	push bx ax	
+	
+	mov bl,08
+	mov ax, MOUSE_X ; prepara o valor de DX que indica a coluna do cursor para ser dividido por 8
+	div bl ; Divide o valor de AX pelo valor de BX
+	mov dl, al ; Move o quociente do resultado para a parte baixa de DX, na qual indica a coluna correta.
+	mov ax, MOUSE_Y ; prepara o valor de CX que indica a linha do cursor para ser dívido por 8.
+	div bl ; Divide o valor de AX pelo valor de BX, 
+	mov dh, al ; Move o quociente do reultado para a parte alta de DX, no qual indica a linha correta.
+	
+	;Neste ponto, temos a linha e coluna em relativa a tela, pois acima dividimos o conteúdo dos registradores DX e CX por 8.
+	;Nas próximas linhas, os valores obtidos através dos calculos acima são adaptados para a nossa matriz, pois a matriz visual é desenhada apartir da posição 1,26, então para transformarmos essa posição em um posição relativa
+	;na matriz precisamos subtrair o valor obtido acima pelos valores base da matriz visual.	
+	
+	mov bh, 26
+	sub dl,bh ; Subtraimos o valor atual da coluna por 26, que indica o valor base da coluna onde foi iniciado o desenho do campo minado
+	dec dh ; Subtraimos o valor atual da linh por 1, que indica o valor base da linha onde foi iniciado o desenho do campo minado	
+	
+	pop ax bx
+    ret
+endp
+
+OPEN_FIELD MACRO ; Altera a visibildade para visível da posição[DH-Linha, DL-Coluna] na matriz.
+	mov al, 01H ; Seta o bit de visibilidade para 1, sinalizando que o conteúdo do campo será mostrado.
+	call WRITE_ELEMENT_AT_INDEX
+endm
+
+IS_VALID_POSITION proc ; Recebe em DH-Linha e DL-Coluna e verifica se a posição é valida retornando em cl- 1 ou cl -0 
+	xor cl,cl ; Registrador usado para indicar se a posição é válida.
+	cmp dl, 0 ; Verifica se a coluna é negativa, caso sim, posição inválida.
+	js FINISH_IS_VALID_POSITION
+	cmp dl, COLUMN_TEMP ; Verifica se a coluna é maior que o limite da matrix, caso sim, posiçao inválida.
+	jge FINISH_IS_VALID_POSITION
+	cmp dh,0 ; Verifica se a linha é negativa, caso sim, posição inválida.
+	js FINISH_IS_VALID_POSITION
+	cmp dh, ROW_TEMP ; Verifica se a linha é maior que o limite da matrix, caso sim, posiçao inválida.
+	jge FINISH_IS_VALID_POSITION
+		
+	 IS_VALID_POS: ; Caso a posição tenha passado em todas as validações acima, a mesma é válida.
+		inc cl
+		
+	 FINISH_IS_VALID_POSITION:
+	 ret
+endp
+
+OPEN_EMPTY_FIELDS proc
+	push dx
+	push bx
+	call GET_ELEMENT_AT_INDEX ; Pega o elemento na posição [DH-Linha,DL-Coluna]
+	cmp al, 02
+	je OPEN_NEIGHBORHOOD
+	OPEN_FIELD ; Seta a visibilidade da posição atual como visível.	
+	cmp ah, 0 ; Caso campo seja vazio, é feito um jump para analizar a vizinhaça, caso contrário finaliza a proc.
+	ja FINISH_OPEN_EMPTY_FIELDS ; Finaliza a proc
+	jmp OPEN_NEIGHBORHOOD ; Busca vizinhos vazios
+	
+	OPEN_NEIGHBORHOOD: ; Começa a procurar vizinhos ao noroeste da posição desejada. 
+		dec dl ; Decrementa a coluna
+		dec dh ; Decrementa a linha
+		xor bx,bx ; Contador linha[BX] e coluna[BL]	
+		
+	OPEN_CURRENT_NEIGHBORHOOD:
+		call IS_VALID_POSITION ; Verifica se a posição atual não é uma posição invalida, ou seja, fora dos limites da matriz, retorna o resultado em cl (cl=0 inválida, cl=1 válida)
+		cmp cl,0 ; Caso a posição atual seja inválida, ele apenas avança para a próxima posição		
+		je JUMP_TO_THE_NEXT_COLUMN ; Avança para a próxima posição
+		xor ax,ax ; Limpa o registrador ax, que armazenará o valor da posição atual na matriz.
+		call GET_ELEMENT_AT_INDEX ; Obtem o conteúdo da posição [DH,DL] na matriz e armazena em AX.
+		cmp al, 01 ; Caso o campo já esteja visível, ele só avança para a próxima posição
+		je JUMP_TO_THE_NEXT_COLUMN
+		cmp al, 02 ; Caso o campo esteja marcado, ele só avança para a próxima posição
+		je JUMP_TO_THE_NEXT_COLUMN
+		call OPEN_EMPTY_FIELDS
+			
+		JUMP_TO_THE_NEXT_COLUMN:
+			inc bl ; Incrementa o contador de colunas.
+			cmp bl, 03 ; Se o contador de colunas já avançou 3 posições, ele avança para a próxima linha.
+			jz JUMP_TO_THE_NEXT_ROW ; Avança para a próxima linha
+			inc dl ; Incrementa a coluna da posição atual na matriz.
+			jmp OPEN_CURRENT_NEIGHBORHOOD ; Continua a verificação.
+		
+		JUMP_TO_THE_NEXT_ROW:
+			xor bl,bl ; Limpa o contador de colunas.
+			sub dl, 2 ; Nesse comando é subtraido 2 unidades da coluna pois ao avançar para a próxima linha, o valor original da coluna deve ser restaurado, exemplo. 00, 01, 02 -> 10,11,12
+			inc dh ; Incrementa a linha da posição atual na matriz.
+			inc bh
+			cmp bh, 03 ; Se o contador de linhas já avançou 3 posiçoes, ele termina a proc.
+			jz FINISH_OPEN_EMPTY_FIELDS
+			jmp OPEN_CURRENT_NEIGHBORHOOD
+	
+	FINISH_OPEN_EMPTY_FIELDS:
+	pop bx
+	pop dx
+	ret
+endp
+
+ESC_INT proc	; recebe em AL o valor a ser convertido e escrito na tela
+	PUSHALL
+	
+	xor bx,bx ; limba o valor de bx.	
+	xor cx,cx ;  limba o valor de cx.	
+	mov bx,10 ; mov para bx o valor 10, que será usado para transformar o conteúdo de al em número.
+	
+	LOOP_TO_WRITE_MAKKED_BOMBS_COUNT:
+		xor ah,ah ; limpa a parte alta de AX para não interferir na divisão por bl.
+		div bl ; divide ax por bl.
+		push ax ; Empilha o resto da dívisão, que será usado em WRITE_NUMBERS para escrever o número de bombas.
+		inc cl ; incrementa o contador de divisões que será usado em WRITE_NUMBERS para saber quantos números foram empilhados.
+		cmp al, 0 ; caso o quociente da divisão seja 0, siginifica que o número já foi totalmente separado e empilhado.
+	ja LOOP_TO_WRITE_MAKKED_BOMBS_COUNT
+	
+	WRITE_NUMBERS:
+		pop ax ; desempilha o valor empilhado por LOOP_TO_WRITE_MAKKED_BOMBS_COUNT para escrever na tela.
+		dec cl ; Contador de números empilhados.
+		mov dl, ah ; move para dl o valor desempilhado.
+		add dl, 30H ; Transforma em número.
+		call ESC_CHAR ; Escreve o número.
+		cmp cl, 0 ; caso todos os números empilhados foram escritos, ele finaliza a proc.
+		ja WRITE_NUMBERS
+		
+	POPALL
+ret
+endp
+
+WRITE_MARKED_BOMBS_COUNT_ON_SCREEN proc; recebe em MARKED_BOMBS o valor atual de bombas para escrever na tela.
+	push ax bx
+	SET_CUR_POS 15,1 ; Seta a posição do cursor para escrever a mensagem de bombas marcadas
+	mov dx, offset markedBombsMessage ; mov para dx o conteúdo da posição de memória especificada em markedBombsMessage, no qual será usado em WRITE_MESSAGE
+	WRITE_MESSAGE
+	mov al, MARKED_BOMBS ; mov para al o contador de bombas marcadas.
+	call ESC_INT
+		
+	FINISH_WRITE_MARKED_BOMBS_COUNT_ON_SCREEN:
+		mov dl, ' ' ; Foi necessário escrever um caracter vazio no final do número, pois caso o contador de bombas fosse 10, ao decrementar o valor ele escrevia 90.
+		call ESC_CHAR
+		pop bx ax
+ret
+endp
+
+VERIFY_WIN proc
+	push dx
+	xor dx,dx
+	xor cx,cx
+	
+	VERIFY_WIN_LOOP:
+		xor ax,ax
+		call GET_ELEMENT_AT_INDEX
+		cmp ah, 0FH
+		je GO_NEXT_COLUMN
+		cmp al, 0
+		je FINISH_VERIFY_WIN
+		cmp al, 2
+		je FINISH_VERIFY_WIN
+		
+		GO_NEXT_COLUMN:
+			inc dl
+			cmp dl, COLUMN_TEMP
+			je GO_NEXT_ROW
+			jmp VERIFY_WIN_LOOP
+		
+		GO_NEXT_ROW:
+			xor dl,dl
+			inc dh
+			cmp dh, ROW_TEMP
+			je IS_WIN
+			jmp VERIFY_WIN_LOOP
+			
+	IS_WIN:
+		inc cl
+			
+	FINISH_VERIFY_WIN:
+	pop dx
+ret
+endp
+
+SHOW_ALL_BOMBS_AND_CLEAR_MATRIX proc
+	push dx
+	xor dx,dx
+	xor cx,cx
+	
+	SHOW_ALL_BOMBS_LOOP:
+		xor ax,ax
+		call GET_ELEMENT_AT_INDEX
+		cmp ah, 0FH
+		je WRITE_BOMB
+		jmp JUMP_COLUMN
+		
+		WRITE_BOMB:			
+			mov al, ah
+			TRANFORM_POS_MATRIX_AT_POS_SCREEN
+			WRITE_ELEMENT_ON_SCREEN
+		
+		JUMP_COLUMN:
+			xor ax,ax
+			call WRITE_ELEMENT_AT_INDEX
+			inc dl
+			cmp dl, COLUMN_TEMP
+			je JUMP_ROW
+			jmp SHOW_ALL_BOMBS_LOOP
+		
+		JUMP_ROW:
+			xor dl,dl
+			inc dh
+			cmp dh, ROW_TEMP
+			je FINISH_SHOW_ALL_BOMBS
+			jmp SHOW_ALL_BOMBS_LOOP	
+			
+	FINISH_SHOW_ALL_BOMBS:
+	pop dx
+ret
+endp
+
+DRAW_TIMER proc ; Pega os segundos do sistema em DH e os Minutos em CL 
+		PUSHALL
+		SET_CUR_POS 14,1
+		mov ah, 02h
+		int 1Ah
+		
+		cmp dh, LAST_SECOND
+		je FINISH_DRAW_TIMER
+		
+		mov LAST_SECOND, dh
+		inc SECONDS
+		cmp SECONDS, 60
+		ja NEXT_MINUTE
+		jmp PRINT_TIMER
+		
+		NEXT_MINUTE:
+			mov SECONDS, 0
+			inc MINUTES
+		
+		PRINT_TIMER:
+		
+		mov dx, offset timerMessage
+		WRITE_MESSAGE
+		
+		mov al, MINUTES
+		call ESC_INT
+		
+		mov dl, ':'
+		call ESC_CHAR
+		
+		mov al, SECONDS
+		call ESC_INT
+		
+		mov dl, ' '
+		call ESC_CHAR
+		
+		FINISH_DRAW_TIMER:
+		POPALL
+	ret
+endp
+
+inicio:	mov AX, @data
+		mov DS, AX
+		
+		mov ah, 00H ; Seta modo de vídeo
+		mov al, 03H ; Seta o modo de vídeo para texto 80x25
+		int 10H
+		
+		;mov COLUMN_TEMP, 10
+		;mov ROW_TEMP, 10
+		;mov BOMBAS_TEMP, 20
+		;call GENERATE_RANDON_NUMBER
+		
+		START: call LIMPATELA	; Limpa a tela
+			   call WRITE_FRAME ; Escreve a moldura
+			   call REQUEST_INFORMATIONS ; Requisita informações de bombas
+			   call GENERATE_RANDON_NUMBER ; Gera as bombas randomicas
+			   call FIND_NEIGHBORHOOD ; Procura vizinhança
+			   call LIMPATELA	; Limpa a tela novamente.
+			   call WRITE_FRAME ; Escreve o campo minado.
+			   call WRITE_FIELD ; Escreve a moldura
+			   call WRITE_MARKED_BOMBS_COUNT_ON_SCREEN ; Escreve na tela a quantidade de bombas marcadas			   
+		
+		mov ah, 02h
+		int 1Ah		
+		mov LAST_SECOND, dh		
+		mov MINUTES, 0
+		mov SECONDS, 0
+		
+		MOUSE_IMPUT:
+			mov ax, 0001H ; prepara o registrador ax indicando que o mouse será mostrado na tela.
+			int 33H ; chama a interrupção de mouse;		
+			mov ax, 0003H ;prepara o registrador ax indicando que será coletado informações sobre o mouse.
+			int 33H ; chama a interrupção de mouse
+			call DRAW_TIMER			
+			cmp WAS_MOUSE_PRESSED, 1 ; Verifica se o mouse está pressionado 
+			je MOUSE_IS_PRESSED ; Caso o mouse esteja pressionado ele verifica se o mesmo foi solto.
+			jmp ANALYSE_MOUSE ; Caso o mouse não esteja pressionado, ele fica esperando por um click.
+			
+			MOUSE_IS_PRESSED:
+				cmp bx, 0 ; Se o estado atual do mouse está solto, ele seta o WAS_MOUSE_PRESSED para 0, notificando que o mouse será analisado no click.
+				je REALEASE_MOUSE
+				jmp MOUSE_IMPUT ; Se o estado atual está pressionado, ele fica no laço até que o mesmo seja liberado.
+			
+			REALEASE_MOUSE:
+				mov WAS_MOUSE_PRESSED,0 ; Mouse liberado
+			
+			ANALYSE_MOUSE:
+				mov MOUSE_X, cx ; MOUSE_X armazena a posição X do mouse
+				mov MOUSE_Y, dx ; MOUSE_Y armazena a posição Y do mouse			
+				cmp bx, 0 ; se o valor de bx for maior que 0, significa que o mouse foi clicado.
+				ja MOUSE_BUTTON_PRESSED ; Analisa qual botão foi clicado.
+				
+				jmp MOUSE_IMPUT ; Caso nenhum botão seja clicado, ele fica no laço esperando até que algum botão seja clicado.
+			
+			MOUSE_BUTTON_PRESSED:
+				mov WAS_MOUSE_PRESSED,1 ; Liga o bit da posição de memória WAS_MOUSE_PRESSED avisando que o mouse está pressionado.
+				call TRANSFORM_MOUSE_INPUT_AT_MATRIX_ELEMENT ; Retorna o valor normalizado da linha[DH] e coluna[DL] da posição clicada.
+				call IS_VALID_POSITION ; Verifica se a posição clicada na tela é válida.
+				cmp cl, 0
+				je MOUSE_IMPUT ; Caso a posição clicada seja inválida, ele apenas volta para o loop do mouse.
+				mov ax, 0002H ; prepara o registrador ax indicando que o mouse será mostrado na tela.
+				int 33H ; chama a interrupção de mouse;				
+				call GET_ELEMENT_AT_INDEX ; Utiliza os valores acima armazenados em DH[LINHA] e DL[Colunha] para pegar o elemento
+										  ;correspondente na matriz. Retorna em AX o valor na linha e coluna informada.
+				shr bx,1 ; o valor de bx indica qual botão foi pressionado, se o SHR de bx resultar na ligação do carry flag, siginifica que o botão esquerdo do mouse foi pressionado.
+				jc LEFT_BUTTON_PRESSED
+				shr bx,1 ; o valor de bx indica qual botão foi pressionado, se o bit 1 ou segundo bit de bx resultar na ligação do carry flag, siginifica que o botão direito do mouse foi pressionado.
+				jc RIGHT_BUTTON_PRESSED
+			
+			RIGHT_BUTTON_PRESSED:
+				cmp al, 01 ; Verifica se o campo que vai ser marcado já está visível, caso sim ele não marca o mesmo.
+				je MOUSE_IMPUT
+				cmp al, 02 ; Verifica se o campo que vai ser marcado já está visível, caso sim ele não marca o mesmo.
+				je MOUSE_IMPUT 
+				mov al, 02		; Move para a parte baixa do registrado ax o valor 02, que indica o campo está marcado.
+				call WRITE_ELEMENT_AT_INDEX ; Altera na matrix a visibilidade do campo clicado.
+				call WRITE_FIELD ; Escreve o campo
+				inc MARKED_BOMBS ; Incrementa o contador de bombas marcadas.
+				call WRITE_MARKED_BOMBS_COUNT_ON_SCREEN ; Escreve na tela a quantidade de bombas marcadas.
+				jmp MOUSE_IMPUT ; Volta para o loop do mouse
+			
+			LEFT_BUTTON_PRESSED :
+				cmp al, 02 ; Verifica se o campo clicado está marcado, caso sim ele desmarca o campo.
+				je CLEAR_MARKED_FIELD
+				cmp al, 01 ; Verifica se o campo clicado já está visível, caso sim ele retorna para a verificação do mouse
+				je MOUSE_IMPUT
+				cmp ah, 0FH ; caso a parte alta do registrador correspondente a matrix na posição clicada na tela seja 0F, significa que a posição clicada é uma bomba, finalizando o jogo.
+				je BOMB_CLICKED
+				
+				HIDE_FIELD_CLICKED: ; Abre o campo clicado e toda sua vizinhança, caso ele seja vazio.
+					call OPEN_EMPTY_FIELDS ; chama a proc que abre os campos.
+					call WRITE_FIELD ; Escreve o campo.
+					
+					call VERIFY_WIN
+					cmp cl, 1
+					je PLAYER_WIN
+					
+					jmp MOUSE_IMPUT; volta para o loop do mouse.
+					
+				CLEAR_MARKED_FIELD:
+					xor al,al ; Limpa o valor de al, sendo assim a posição clicada é ocultada.
+					call WRITE_ELEMENT_AT_INDEX ; Altera na matrix a visibilidade do campo clicado.
+					call WRITE_FIELD ; Escreve o campo minado.
+					dec MARKED_BOMBS ; Decrementa o contador de bombas marcadas.
+					call WRITE_MARKED_BOMBS_COUNT_ON_SCREEN ; Escreve a quantidade de bombas marcadas.
+					jmp MOUSE_IMPUT ; volta para o loop do mouse.
+					
+			BOMB_CLICKED:
+				SET_CUR_POS 2,1
+				mov dx, offset loseMessage
+				WRITE_MESSAGE			
+				jmp FINISH_GAME
+				
+			PLAYER_WIN: 
+				SET_CUR_POS 2,1
+				mov dx, offset winMessage
+				WRITE_MESSAGE
+				
+			FINISH_GAME:
+				SET_CUR_POS 3,1
+				mov dx, offset pressButtonMessage1
+				WRITE_MESSAGE
+				
+				SET_CUR_POS 4,1
+				mov dx, offset pressButtonMessage2
+				WRITE_MESSAGE
+				
+				call SHOW_ALL_BOMBS_AND_CLEAR_MATRIX
+				call LE_CHAR
+				mov MARKED_BOMBS, 0
+			jmp START
+			
+	FINALIZA:	mov ah, 4CH	; prepara o fim do programa
+				int 21h		; sinaliza o DOS 
+	
+end inicio
